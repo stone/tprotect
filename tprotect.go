@@ -62,9 +62,8 @@ func scanProcesses() (worstpid int) {
 			continue
 		}
 		if err != nil {
-			log.Println("PID ERR: ", pid, buf0)
+			//log.Println("PID ERR: ", pid, buf0)
 			continue
-			// self - hoppa över? dennna redan här?
 		}
 		stats := strings.Split(string(fs), " ")
 		majflt, err := strconv.Atoi(stats[11])
@@ -102,7 +101,7 @@ func getPageFaults() (int, error) {
 	file, err := os.Open("/proc/vmstat")
 	defer file.Close()
 	if err != nil {
-		log.Fatal("Could not open /proc/vmstat")
+		log.Fatal("could not open /proc/vmstat")
 	}
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -110,7 +109,7 @@ func getPageFaults() (int, error) {
 		if strings.HasPrefix(buf, "pgmajfault") {
 			pf, err := strconv.Atoi(buf[12:])
 			if err != nil {
-				log.Fatal("Could not parse vmstat file")
+				log.Fatal("could not parse vmstat file")
 			}
 			return pf, nil
 		}
@@ -120,7 +119,7 @@ func getPageFaults() (int, error) {
 		log.Fatal(err)
 	}
 
-	return 0, errors.New("Unable to parse /proc/vmstat")
+	return 0, errors.New("unable to parse /proc/vmstat")
 }
 
 func freezeSomething(frozenPids []int, numFreezes int) ([]int, int) {
@@ -164,7 +163,7 @@ func unfreezeSomething(frozenPids []int, numUnFreezes int) ([]int, int) {
 			// Process wannished?
 			return frozenPids, numUnFreezes
 		}
-		log.Println("Unfreezing pid: ", pidToUnFreeze)
+		log.Println("unfreezing pid: ", pidToUnFreeze)
 		err = ptuf.Signal(syscall.SIGCONT)
 		if err != nil {
 			log.Println("error sending SIGCONT: ", err)
@@ -195,7 +194,7 @@ func mainLoop() {
 			for p := range frozenPids {
 				pu, err := os.FindProcess(frozenPids[p])
 				if err != nil {
-					log.Println("Could not unfreeze pid: ", frozenPids[p], err)
+					log.Println("could not unfreeze pid: ", frozenPids[p], err)
 				}
 				log.Printf("%d unfreezed", frozenPids[p])
 				pu.Signal(syscall.SIGCONT)
