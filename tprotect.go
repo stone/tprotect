@@ -18,10 +18,12 @@ import (
 // Version of tprotect, need to remember to update this
 const version = "0.1"
 
-type PidPageFault map[int]int
+// Type Map that holds the Pid = Pagefault data
+type pidPageFault map[int]int
 
-var pgfaults = make(PidPageFault)
+var pgfaults = make(pidPageFault)
 
+// Config Holds the configuration parameters
 type Config struct {
 	SleepInterval            time.Duration  // In seconds
 	FaultThreshold           int            // Number of faults per SleepInterval
@@ -33,6 +35,7 @@ type Config struct {
 // Global config (TODO: Add Config file)
 var cfg = new(Config)
 
+// SetDefaults sets the default Configuration
 func (c *Config) SetDefaults() {
 	c.SleepInterval = 3
 	c.FaultThreshold = 5
@@ -41,19 +44,19 @@ func (c *Config) SetDefaults() {
 	c.UnfreezePopRatio = 5
 }
 
-func ScanProcesses() (worstpid int) {
-	stat_files, err := filepath.Glob("/proc/*/stat")
+func scanProcesses() (worstpid int) {
+	statFiles, err := filepath.Glob("/proc/*/stat")
 	if err != nil {
 		log.Fatal("failed get files to stat")
 	}
 
-	for pfile := range stat_files {
-		fs, err := ioutil.ReadFile(stat_files[pfile])
+	for pfile := range statFiles {
+		fs, err := ioutil.ReadFile(statFiles[pfile])
 		if err != nil {
-			//fmt.Print(stat_files[pfile])
+			//fmt.Print(statFiles[pfile])
 			continue
 		}
-		buf0 := strings.Split(stat_files[pfile], "/")[2]
+		buf0 := strings.Split(statFiles[pfile], "/")[2]
 		pid, err := strconv.Atoi(buf0)
 		if pid == 0 {
 			continue
@@ -95,8 +98,9 @@ func ScanProcesses() (worstpid int) {
 
 }
 
-func GetPageFaults() (int, error) {
+func getPageFaults() (int, error) {
 	file, err := os.Open("/proc/vmstat")
+	defer file.Close()
 	if err != nil {
 		log.Fatal("Could not open /proc/vmstat")
 	}
@@ -119,48 +123,48 @@ func GetPageFaults() (int, error) {
 	return 0, errors.New("Unable to parse /proc/vmstat")
 }
 
-func freeze_something(frozen_pids []int, num_freezes int) ([]int, int) {
-	pid_to_freeze := ScanProcesses()
-	if pid_to_freeze == 0 {
-		return frozen_pids, num_freezes
+func freezeSomething(frozenPids []int, numFreezes int) ([]int, int) {
+	pidToFreeze := scanProcesses()
+	if pidToFreeze == 0 {
+		return frozenPids, numFreezes
 	}
-	frozen_pids = append(frozen_pids, pid_to_freeze)
-	num_freezes += 1
+	frozenPids = append(frozenPids, pidToFreeze)
+	numFreezes += 1
 
-	ptf, err := os.FindProcess(pid_to_freeze)
+	ptf, err := os.FindProcess(pidToFreeze)
 	if err != nil {
 		// Process wannished?
-		return frozen_pids, num_freezes
+		return frozenPids, numFreezes
 	}
-	log.Println("freezing pid: ", pid_to_freeze)
+	log.Println("freezing pid: ", pidToFreeze)
 	err = ptf.Signal(syscall.SIGSTOP)
 	if err != nil {
 		log.Println("error sending SIGSTOP: ", err)
 	}
-	return frozen_pids, num_freezes
+	return frozenPids, numFreezes
 }
 
-func unfreeze_something(frozen_pids []int, num_unfreezes int) ([]int, int) {
+func unfreezeSomething(frozenPids []int, numUnFreezes int) ([]int, int) {
 
-	var pid_to_unfreeze int
+	var pidToUnFreeze int
 
-	if len(frozen_pids) > 0 {
-		x := math.Remainder(float64(num_unfreezes), float64(cfg.UnfreezePopRatio))
+	if len(frozenPids) > 0 {
+		x := math.Remainder(float64(numUnFreezes), float64(cfg.UnfreezePopRatio))
 
 		if x > 0 {
 			// Trick to POP from an slice.. :-/
-			pid_to_unfreeze, frozen_pids = frozen_pids[len(frozen_pids)-1], frozen_pids[:len(frozen_pids)-1]
+			pidToUnFreeze, frozenPids = frozenPids[len(frozenPids)-1], frozenPids[:len(frozenPids)-1]
 		} else {
-			pid_to_unfreeze = frozen_pids[0]
-			frozen_pids = frozen_pids[1:]
+			pidToUnFreeze = frozenPids[0]
+			frozenPids = frozenPids[1:]
 		}
 
-		ptuf, err := os.FindProcess(pid_to_unfreeze)
+		ptuf, err := os.FindProcess(pidToUnFreeze)
 		if err != nil {
 			// Process wannished?
-			return frozen_pids, num_unfreezes
+			return frozenPids, numUnFreezes
 		}
-		log.Println("Unfreezing pid: ", pid_to_unfreeze)
+		log.Println("Unfreezing pid: ", pidToUnFreeze)
 		err = ptuf.Signal(syscall.SIGCONT)
 		if err != nil {
 			log.Println("error sending SIGCONT: ", err)
@@ -168,15 +172,15 @@ func unfreeze_something(frozen_pids []int, num_unfreezes int) ([]int, int) {
 
 	}
 
-	return frozen_pids, num_unfreezes
+	return frozenPids, numUnFreezes
 }
 
-func MainLoop() {
-	last_observed_pagefaults, _ := GetPageFaults()
-	last_scan_pagefaults := 0
-	var frozen_pids []int
-	var num_freezes int = 0
-	var num_unfreezes int = 0
+func mainLoop() {
+	lastObservedPagefaults, _ := getPageFaults()
+	lastScanPagefaults := 0
+	var frozenPids []int
+	var numFreezes int
+	var numUnFreezes int
 
 	// Handle signals, what we are trying to do is when we quit
 	// we unfreeze the freezed processes so we don't leave with
@@ -188,12 +192,12 @@ func MainLoop() {
 	go func() {
 		for sig := range c {
 			log.Printf("Got %v, unfreezing freezed processes..", sig)
-			for p := range frozen_pids {
-				pu, err := os.FindProcess(frozen_pids[p])
+			for p := range frozenPids {
+				pu, err := os.FindProcess(frozenPids[p])
 				if err != nil {
-					log.Println("Could not unfreeze pid: ", frozen_pids[p], err)
+					log.Println("Could not unfreeze pid: ", frozenPids[p], err)
 				}
-				log.Printf("%d unfreezed", frozen_pids[p])
+				log.Printf("%d unfreezed", frozenPids[p])
 				pu.Signal(syscall.SIGCONT)
 			}
 			os.Exit(0)
@@ -201,19 +205,19 @@ func MainLoop() {
 	}()
 
 	for {
-		current_pagefaults, err := GetPageFaults()
+		currentPagefaults, err := getPageFaults()
 		if err != nil {
 			log.Fatal(err)
 		}
 		switch {
-		case current_pagefaults-last_observed_pagefaults > cfg.FaultThreshold:
-			frozen_pids, num_freezes = freeze_something(frozen_pids, num_freezes)
-		case current_pagefaults-last_observed_pagefaults == 0:
-			frozen_pids, num_unfreezes = unfreeze_something(frozen_pids, num_unfreezes)
+		case currentPagefaults-lastObservedPagefaults > cfg.FaultThreshold:
+			frozenPids, numFreezes = freezeSomething(frozenPids, numFreezes)
+		case currentPagefaults-lastObservedPagefaults == 0:
+			frozenPids, numUnFreezes = unfreezeSomething(frozenPids, numUnFreezes)
 		}
 
-		if current_pagefaults-last_scan_pagefaults > cfg.ProcessScanningThreshold {
-			last_observed_pagefaults = current_pagefaults
+		if currentPagefaults-lastScanPagefaults > cfg.ProcessScanningThreshold {
+			lastObservedPagefaults = currentPagefaults
 		}
 
 		time.Sleep(cfg.SleepInterval * time.Second)
@@ -223,5 +227,5 @@ func MainLoop() {
 func main() {
 	log.Printf("tprotect v%s start", version)
 	cfg.SetDefaults()
-	MainLoop()
+	mainLoop()
 }
